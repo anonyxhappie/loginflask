@@ -1,10 +1,20 @@
-from flask import Flask, render_template, flash, redirect, url_for, session, request, logging, jsonify
+from flask import Flask, render_template, flash, redirect, url_for, session, request, logging
 from flask_mysqldb import MySQL
 from wtforms import Form, StringField, TextAreaField, PasswordField, validators
 from passlib.hash import sha256_crypt
-import requests
+
 
 app = Flask(__name__)
+
+# Config MySQL
+app.config['MYSQL_HOST'] = 'localhost'
+app.config['MYSQL_USER'] = 'root'
+app.config['MYSQL_PASSWORD'] = ''
+app.config['MYSQL_DB'] = 'loginflask'
+app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
+
+# Init MySQL
+mysql = MySQL(app) 
 
 @app.route('/') 
 def index():
@@ -27,9 +37,19 @@ def signup():
         name = form.name.data
         email = form.email.data
         password = sha256_crypt.encrypt(str(form.password.data))
-        requests.post('http://127.0.0.1:5000/loginflask/api/v1/users',
-                      json={'name': name, 'email': email, 'password': password})
+
+        # Create Cursor and Execute Query
+        cur = mysql.connection.cursor()
+        cur.execute("INSERT INTO users(name, email, password) VALUES (%s, %s, %s)", (name, email, password))
+
+        # Commit to DB
+        mysql.connection.commit()
+
+        # Close connection
+        cur.close()      
+
         flash('You are now Signed Up. You can login now.', 'success')
+
         redirect(url_for('login'))
     return render_template('signup.html', form=form)
 
@@ -39,10 +59,12 @@ def login():
     if request.method == 'POST':
         email = request.form['email']
         current_password = request.form['password']
-        user_url = 'http://127.0.0.1:5000/loginflask/api/v1/user/' + email
-        result = requests.get(user_url)
-        data = result.json()
-        if data['email']:
+
+        # Create Cursor and Execute Query
+        cur = mysql.connection.cursor()
+        result = cur.execute("SELECT * FROM users WHERE email = %s", [email])
+        if result > 0:
+            data = cur.fetchone()
             password = data['password']
             if sha256_crypt.verify(current_password, password):
                 session['logged_in'] = True
@@ -53,9 +75,16 @@ def login():
             else:
                 error = 'Invalid Login'
                 return render_template('login.html', error=error)
+            cur.close()    
         else:
             error = 'Email not found'
             return render_template('login.html', error=error)
+
+        # Commit to DB
+        mysql.connection.commit()
+
+        # Close connection
+        cur.close()
 
     return render_template('login.html')    
 
@@ -72,4 +101,4 @@ def dashboard():
 
 if __name__ == '__main__':
     app.secret_key='secret101'
-    app.run(debug=True, port=5500)
+    app.run(debug=True)
